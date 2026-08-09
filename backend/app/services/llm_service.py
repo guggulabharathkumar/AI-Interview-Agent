@@ -257,19 +257,52 @@ class AdaptiveMockProvider(BaseLLMProvider):
 
     async def generate_text(self, system_prompt: str, user_prompt: str) -> str:
         user_lower = user_prompt.lower()
+        
+        # Extract candidate's last answer text if present
+        last_ans = ""
+        if "candidate's last answer:" in user_lower:
+            try:
+                parts = user_prompt.split("Candidate's Last Answer:")
+                if len(parts) > 1:
+                    last_ans = parts[1].split("\n")[1].strip().strip('"')
+            except Exception:
+                last_ans = ""
+        last_ans_lower = last_ans.lower()
 
-        # Follow-up generation based on evaluator action and user prompt content
-        if "evaluator action recommendation: follow_up_deeper" in user_lower or "follow_up_tradeoff" in user_lower:
-            return "Good response. Now, suppose your system experiences high traffic and strict latency SLA requirements. What specific architectural trade-offs would you make to maintain retrieval accuracy while optimizing latency?"
+        # Dynamic, candidate-grounded follow-up questions (concise 1-2 sentences)
+        if "hnsw" in last_ans_lower or "ivf" in last_ans_lower or "ann" in last_ans_lower or "nearest neighbor" in last_ans_lower:
+            if "recall" in last_ans_lower or "latency" in last_ans_lower or "memory" in last_ans_lower:
+                return "You mentioned recall, memory, and latency trade-offs with HNSW and IVF. When indexing 500 million vectors under tight RAM constraints, which specific parameters would you tune first?"
+            return "You brought up HNSW graph indexing. How would its memory consumption impact your node sizing decisions when storing tens of millions of embeddings in production?"
 
-        if "evaluator action recommendation: follow_up_clarify" in user_lower:
-            return "Thank you for that overview. Could you clarify the exact step between generating the document embedding and querying the vector index?"
+        if "embedding" in last_ans_lower or "vector" in last_ans_lower:
+            if "database" in last_ans_lower or "chroma" in last_ans_lower or "pinecone" in last_ans_lower:
+                return "You highlighted using vector databases for embedding search. What strategy would you use when retrieved vector chunks are semantically similar but factually irrelevant to the query?"
+            return "You noted that embeddings convert text into dense vectors for similarity search. How do you choose between Cosine Distance, Dot Product, and L2 Euclidean distance for normalized embeddings?"
+
+        if "rag" in last_ans_lower or "retrieval" in last_ans_lower:
+            return "You mentioned RAG context grounding. How do you detect and mitigate context poisoning or prompt injection in retrieved document chunks before feeding them to the LLM?"
+
+        if "prompt" in last_ans_lower or "function" in last_ans_lower or "pydantic" in last_ans_lower:
+            return "You noted the role of function calling and Pydantic validation. How do you handle cases where the LLM produces malformed arguments or fails schema validation during tool execution?"
+
+        if "docker" in last_ans_lower or "container" in last_ans_lower or "kubernetes" in last_ans_lower:
+            return "You mentioned containerizing AI microservices with Docker. How do you structure multi-stage builds to minimize container image size and build caching time?"
 
         if "evaluator action recommendation: decrease_difficulty" in user_lower:
-            return "Let's step back to the core concept. In simple terms, how would you define the main role of this component in the pipeline?"
+            return "Let's step back to the fundamental concepts. In simple terms, what is the main engineering problem that this vector component solves?"
 
-        # Default fallback text
-        return "Thank you for explaining that. Let's examine how this concept connects with system architecture in production."
+        # Fallback question grounded in planned base question theme
+        if "planned base theme:" in user_lower:
+            try:
+                planned_theme = user_prompt.split("Planned Base Theme:")[1].split("\n")[0].strip()
+                if planned_theme:
+                    return f"Building on your point: {planned_theme}"
+            except Exception:
+                pass
+
+        return "Building on your previous response, how would you architect this component to handle production failure modes and scaling limits?"
+
 
 
 def get_llm_provider() -> BaseLLMProvider:

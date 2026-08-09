@@ -104,11 +104,13 @@ class InterviewResponse(BaseModel):
     feedback: Optional[FeedbackResponse] = None
     stage: Optional[str] = None
     questionNumber: Optional[int] = None
-    maxQuestions: Optional[int] = 15
+    minQuestions: int = 8
+    maxQuestions: int = 15
     topicsCovered: Optional[List[str]] = None
     daysCovered: Optional[List[int]] = None
     difficulty: Optional[str] = None
     currentTopic: Optional[str] = None
+
 
 class SessionState(BaseModel):
     sessionId: str

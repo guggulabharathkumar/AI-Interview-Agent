@@ -15,7 +15,7 @@ from app.agents.feedback_generator import feedback_generator_agent
 logger = logging.getLogger("ai_interview_agent.service")
 
 class InterviewService:
-    """Orchestrates adaptive technical interview state machine and agent actions."""
+    """Orchestrates adaptive technical interview state machine, curriculum tracking, and agent actions."""
 
     async def start_interview(self, session_id: str, candidate_data: Dict[str, Any]) -> InterviewResponse:
         logger.info(f"Starting interview session {session_id} for candidate {candidate_data.get('member', {}).get('name')}")
@@ -33,21 +33,23 @@ class InterviewService:
             analyzed_profile=analyzed_profile
         )
 
-        # Initial baseline question
+        # Initial baseline question (Question 1)
         session.stage = StageEnum.BASELINE
+        session.questionCount = 1
         question_meta = await question_planner_agent.plan_question(session)
         
         session.questions.append(question_meta)
         session.currentQuestion = question_meta.model_dump()
         session.currentTopic = question_meta.topic
         session.currentDay = question_meta.day
+        
         if question_meta.topic not in session.topicsCovered:
             session.topicsCovered.append(question_meta.topic)
         if question_meta.day not in session.daysCovered:
             session.daysCovered.append(question_meta.day)
 
-        # Welcome message
-        welcome_reply = f"Welcome {candidate.member.name}. Let's begin your technical interview.\n\nTo start off: {question_meta.question}"
+        # Welcome message incorporating Question 1
+        welcome_reply = f"Welcome {candidate.member.name}. Let's begin your technical interview.\n\n{question_meta.question}"
         
         session_service.save_session(session)
         return InterviewResponse(
@@ -55,6 +57,7 @@ class InterviewService:
             done=False,
             stage=session.stage.value,
             questionNumber=1,
+            minQuestions=8,
             maxQuestions=15,
             topicsCovered=session.topicsCovered,
             daysCovered=session.daysCovered,
@@ -74,6 +77,7 @@ class InterviewService:
                 feedback=session.feedback,
                 stage=StageEnum.COMPLETED.value,
                 questionNumber=session.questionCount,
+                minQuestions=8,
                 maxQuestions=15,
                 topicsCovered=session.topicsCovered,
                 daysCovered=session.daysCovered,
@@ -81,19 +85,18 @@ class InterviewService:
                 currentTopic=session.currentTopic
             )
 
-        logger.info(f"Session {session_id} - Turn {session.questionCount + 1} - Msg: {candidate_message[:50]}...")
+        logger.info(f"Session {session_id} - Processing candidate response for question {session.questionCount}")
 
-        # 1. Record candidate answer
+        # 1. Record candidate answer (does NOT increment question count; only questions increment questionCount)
         session.answers.append(candidate_message)
-        session.questionCount += 1
 
-        # 2. Get last asked question metadata
+        # 2. Get current asked question metadata
         current_q_meta = session.questions[-1] if session.questions else QuestionMetadata(
-            question="Previous topic", day=7, topic="Embeddings explained",
+            question="Previous topic", day=7, topic="Embeddings Explained",
             difficulty=session.difficulty, type="conceptual", purpose="Baseline assessment"
         )
 
-        # 3. Evaluate answer
+        # 3. Evaluate candidate answer
         eval_result = await evaluator_agent.evaluate_answer(
             question_meta=current_q_meta,
             candidate_answer=candidate_message,
@@ -101,7 +104,7 @@ class InterviewService:
         )
         session.evaluations.append(eval_result)
 
-        # Update cumulative strengths & weaknesses
+        # Update candidate cumulative strengths & weaknesses
         for s in eval_result.strengths:
             if s not in session.candidateStrengths:
                 session.candidateStrengths.append(s)
@@ -109,7 +112,7 @@ class InterviewService:
             if w not in session.candidateWeaknesses:
                 session.candidateWeaknesses.append(w)
 
-        # 4. Adapt difficulty based on score and evaluator action
+        # 4. Adapt difficulty based on evaluator action and score
         if eval_result.recommendedAction in ["INCREASE_DIFFICULTY", "MOVE_TO_SYSTEM_DESIGN"] or eval_result.score >= 8.5:
             if session.difficulty == "Beginner":
                 session.difficulty = "Intermediate"
@@ -125,17 +128,15 @@ class InterviewService:
             elif session.difficulty == "Intermediate":
                 session.difficulty = "Beginner"
 
-        # 5. Check stage progression and evidence-based termination criteria
+        # 5. Check stage progression and completion criteria (8 <= questions <= 15)
         q_count = session.questionCount
-        unique_days_covered = len(set(session.daysCovered))
+        unique_days = len(set(session.daysCovered))
 
         should_finish = False
         if q_count >= 15:
             should_finish = True
         elif q_count >= 8:
             should_finish = True
-
-
 
         if should_finish:
             session.stage = StageEnum.COMPLETED
@@ -152,6 +153,7 @@ class InterviewService:
                 feedback=feedback,
                 stage=StageEnum.COMPLETED.value,
                 questionNumber=q_count,
+                minQuestions=8,
                 maxQuestions=15,
                 topicsCovered=session.topicsCovered,
                 daysCovered=session.daysCovered,
@@ -159,15 +161,18 @@ class InterviewService:
                 currentTopic=session.currentTopic
             )
 
-        # Update Stage State Machine adaptively
-        if q_count < 2:
+        # Increment question count for the upcoming interviewer question
+        session.questionCount += 1
+        next_q_number = session.questionCount
+
+        # Update Stage State Machine
+        if next_q_number < 3:
             session.stage = StageEnum.BASELINE
-        elif q_count < 4:
+        elif next_q_number < 5:
             session.stage = StageEnum.DEEP_DIVE
-        elif q_count < 6:
+        elif next_q_number < 7:
             session.stage = StageEnum.CROSS_TOPIC
-        elif q_count < 8:
-            # Strong candidates jump to System Design faster
+        elif next_q_number < 9:
             session.stage = StageEnum.SYSTEM_DESIGN if eval_result.score >= 7.5 else StageEnum.DEEP_DIVE
         else:
             session.stage = StageEnum.PRODUCTION
@@ -189,12 +194,13 @@ class InterviewService:
         session.currentTopic = next_q_meta.topic
         session.currentDay = next_q_meta.day
 
+        # Update curriculum tracking without duplicates
         if next_q_meta.topic not in session.topicsCovered:
             session.topicsCovered.append(next_q_meta.topic)
         if next_q_meta.day not in session.daysCovered:
             session.daysCovered.append(next_q_meta.day)
 
-        # 7. Generate realistic Interviewer Reply
+        # 7. Generate concise, contextual Interviewer Reply (1-3 sentences)
         interviewer_reply = await interviewer_agent.generate_response(
             session=session,
             question_meta=next_q_meta,
@@ -207,7 +213,8 @@ class InterviewService:
             reply=interviewer_reply,
             done=False,
             stage=session.stage.value,
-            questionNumber=session.questionCount + 1,
+            questionNumber=next_q_number,
+            minQuestions=8,
             maxQuestions=15,
             topicsCovered=session.topicsCovered,
             daysCovered=session.daysCovered,
