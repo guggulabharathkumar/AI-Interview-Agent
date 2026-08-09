@@ -45,6 +45,7 @@ class AnalyzedCandidateProfile(BaseModel):
     lowAttemptTopics: List[str] = Field(default_factory=list)
     experienceLevel: str = "Intermediate"
     recommendedDifficulty: str = "Intermediate"
+    roleFocus: str = "BACKEND"
 
 class CurriculumDay(BaseModel):
     day: int
@@ -73,14 +74,18 @@ class QuestionMetadata(BaseModel):
     expectedSignals: List[str] = Field(default_factory=list)
 
 class EvaluationResult(BaseModel):
-    score: float  # 0 to 10
-    correct: bool
-    depth: float  # 0 to 10
-    confidence: float  # 0 to 10
+    score: float = 7.0  # 0 to 10
+    correctness: float = 7.0  # 0 to 10
+    depth: float = 7.0  # 0 to 10
+    reasoning: float = 7.0  # 0 to 10
+    practicality: float = 7.0  # 0 to 10
+    confidence: float = 7.0  # 0 to 10
     missingConcepts: List[str] = Field(default_factory=list)
+    misconceptions: List[str] = Field(default_factory=list)
     strengths: List[str] = Field(default_factory=list)
     weaknesses: List[str] = Field(default_factory=list)
-    recommendedAction: str  # FOLLOW_UP_DEEPER | FOLLOW_UP_CLARIFY | FOLLOW_UP_SCENARIO | FOLLOW_UP_TRADEOFF | FOLLOW_UP_DEBUGGING | MOVE_TO_NEXT_TOPIC
+    recommendedAction: str = "FOLLOW_UP_DEEPER"
+    followUpType: str = "FOLLOW_UP_DEEPER"
 
 class FeedbackResponse(BaseModel):
     summary: str
@@ -97,6 +102,13 @@ class InterviewResponse(BaseModel):
     reply: str
     done: bool
     feedback: Optional[FeedbackResponse] = None
+    stage: Optional[str] = None
+    questionNumber: Optional[int] = None
+    maxQuestions: Optional[int] = 15
+    topicsCovered: Optional[List[str]] = None
+    daysCovered: Optional[List[int]] = None
+    difficulty: Optional[str] = None
+    currentTopic: Optional[str] = None
 
 class SessionState(BaseModel):
     sessionId: str
@@ -109,9 +121,14 @@ class SessionState(BaseModel):
     questions: List[QuestionMetadata] = Field(default_factory=list)
     answers: List[str] = Field(default_factory=list)
     evaluations: List[EvaluationResult] = Field(default_factory=list)
+    currentQuestion: Optional[Dict[str, Any]] = None
     currentTopic: Optional[str] = None
     currentDay: Optional[int] = None
     difficulty: str = "Intermediate"
+    candidateStrengths: List[str] = Field(default_factory=list)
+    candidateWeaknesses: List[str] = Field(default_factory=list)
+    followUpCount: int = 0
+    interviewSignals: Dict[str, Any] = Field(default_factory=dict)
     startedAt: str
     completed: bool = False
     feedback: Optional[FeedbackResponse] = None

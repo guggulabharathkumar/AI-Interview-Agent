@@ -4,7 +4,7 @@ import InterviewChat from '../components/InterviewChat';
 import FeedbackPanel from '../components/FeedbackPanel';
 import ProgressBar from '../components/ProgressBar';
 import { startInterview, sendCandidateTurn } from '../services/api';
-import { User, Award, BookOpen, Layers, Activity } from 'lucide-react';
+import { User, Award, BookOpen, Layers, Activity, ShieldCheck } from 'lucide-react';
 
 export default function Interview({ candidate, onReset }) {
   const [sessionId] = useState(() => `session-${Date.now()}`);
@@ -12,9 +12,12 @@ export default function Interview({ candidate, onReset }) {
   const [loading, setLoading] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [feedback, setFeedback] = useState(null);
-  const [questionCount, setQuestionCount] = useState(0);
+  const [questionCount, setQuestionCount] = useState(1);
   const [stage, setStage] = useState('BASELINE');
+  const [difficulty, setDifficulty] = useState('Intermediate');
   const [topicsCovered, setTopicsCovered] = useState([]);
+  const [daysCovered, setDaysCovered] = useState([]);
+  const [currentTopic, setCurrentTopic] = useState('');
   const [error, setError] = useState(null);
 
   // Initialize interview on mount
@@ -32,6 +35,13 @@ export default function Interview({ candidate, onReset }) {
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }
         ]);
+        if (res.stage) setStage(res.stage);
+        if (res.questionNumber) setQuestionCount(res.questionNumber);
+        if (res.difficulty) setDifficulty(res.difficulty);
+        if (res.topicsCovered) setTopicsCovered(res.topicsCovered);
+        if (res.daysCovered) setDaysCovered(res.daysCovered);
+        if (res.currentTopic) setCurrentTopic(res.currentTopic);
+
         if (res.done) {
           setCompleted(true);
           setFeedback(res.feedback);
@@ -60,7 +70,14 @@ export default function Interview({ candidate, onReset }) {
 
     try {
       const res = await sendCandidateTurn(sessionId, text.trim());
-      setQuestionCount(prev => prev + 1);
+      
+      // Update backend metadata state
+      if (res.stage) setStage(res.stage);
+      if (res.questionNumber) setQuestionCount(res.questionNumber);
+      if (res.difficulty) setDifficulty(res.difficulty);
+      if (res.topicsCovered) setTopicsCovered(res.topicsCovered);
+      if (res.daysCovered) setDaysCovered(res.daysCovered);
+      if (res.currentTopic) setCurrentTopic(res.currentTopic);
 
       if (res.done) {
         setCompleted(true);
@@ -118,26 +135,30 @@ export default function Interview({ candidate, onReset }) {
 
           <div className="sidebar-card">
             <div className="sidebar-title" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Activity size={16} /> Session Metrics
+              <Activity size={16} /> Interview State & Stage
             </div>
-            <ProgressBar questionCount={questionCount} minQuestions={8} stage={stage} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginTop: '0.75rem' }}>
-              <span style={{ color: 'var(--text-muted)' }}>Status:</span>
-              <span style={{ color: completed ? 'var(--status-success)' : 'var(--accent-primary)', fontWeight: 600 }}>
-                {completed ? 'COMPLETED' : 'IN_PROGRESS'}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+              <span className="stage-badge">{stage}</span>
+              <span className="pill" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', borderColor: 'rgba(245, 158, 11, 0.3)' }}>
+                {difficulty}
               </span>
             </div>
+            <ProgressBar questionCount={questionCount} minQuestions={8} stage={stage} />
           </div>
 
           <div className="sidebar-card">
             <div className="sidebar-title" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <BookOpen size={16} /> Cohort Journey
+              <BookOpen size={16} /> Curriculum Assessed
             </div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-              Missions Completed: <strong>{candidate.signals.missionsCompleted}</strong> / 31
+              Cohort Days Covered: <strong>{daysCovered.length}</strong> / 31
             </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              First-Try Passes: <strong>{candidate.signals.missionsFirstTry}</strong>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.5rem' }}>
+              {topicsCovered.map((topic, idx) => (
+                <span key={idx} className="pill" style={{ fontSize: '0.7rem', background: 'rgba(99, 102, 241, 0.15)', color: '#a5b4fc', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
+                  {topic}
+                </span>
+              ))}
             </div>
           </div>
         </aside>
@@ -162,6 +183,9 @@ export default function Interview({ candidate, onReset }) {
               feedback={feedback}
               candidate={candidate}
               topicsCovered={topicsCovered}
+              daysCovered={daysCovered}
+              questionCount={questionCount}
+              difficulty={difficulty}
               onRestart={onReset}
             />
           )}

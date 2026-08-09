@@ -61,7 +61,7 @@ class CandidateService:
                 else:
                     strength_topics.append(title)
             else:
-                # Failed mission
+                # Failed mission - strict non-completion
                 weak_topics.append(title)
                 if attempts >= 2:
                     high_attempt_topics.append(title)
@@ -77,10 +77,20 @@ class CandidateService:
         else:
             exp_level = "Junior"
 
-        # Special role handling
-        is_non_tech = any(r in role for r in ["business", "analyst", "manager", "product", "ux", "marketing", "hr"])
+        # Role focus classification
+        if any(r in role for r in ["ai", "machine learning", "data scientist", "llm"]):
+            role_focus = "AI_ENGINEER"
+        elif any(r in role for r in ["devops", "platform", "infrastructure", "sre", "cloud"]):
+            role_focus = "DEVOPS"
+        elif any(r in role for r in ["backend", "software", "systems"]):
+            role_focus = "BACKEND"
+        elif any(r in role for r in ["business", "analyst", "manager", "product", "ux", "marketing", "hr"]):
+            role_focus = "NON_TECH"
+        else:
+            role_focus = "BACKEND"
 
-        if is_non_tech:
+        # Recommended starting difficulty based on role and experience
+        if role_focus == "NON_TECH":
             rec_diff = "Beginner" if exp_level == "Junior" else "Intermediate"
         elif exp_level == "Senior":
             rec_diff = "Advanced"
@@ -96,7 +106,8 @@ class CandidateService:
             highAttemptTopics=high_attempt_topics,
             lowAttemptTopics=low_attempt_topics,
             experienceLevel=exp_level,
-            recommendedDifficulty=rec_diff
+            recommendedDifficulty=rec_diff,
+            roleFocus=role_focus
         )
 
 candidate_service = CandidateService()

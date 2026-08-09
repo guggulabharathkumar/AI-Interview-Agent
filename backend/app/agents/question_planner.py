@@ -1,11 +1,10 @@
-import random
 from typing import List, Optional
-from app.models import SessionState, QuestionMetadata, StageEnum
+from app.models import SessionState, QuestionMetadata, StageEnum, EvaluationResult
 from app.services.curriculum_service import curriculum_service
 from app.services.llm_service import get_llm_provider
 
 QUESTION_PLANNER_SYSTEM_PROMPT = """You are a Technical Question Planner Agent.
-Your job is to select the next curriculum topic, question type, and purpose for an ongoing AI engineering interview.
+Your job is to select the next curriculum topic, question type, and purpose for an ongoing AI engineering interview based on candidate performance and previous answer.
 
 Output JSON Structure Required:
 {
@@ -20,73 +19,61 @@ Output JSON Structure Required:
 """
 
 class QuestionPlannerAgent:
-    """Agent that plans curriculum topics and question metadata."""
+    """Agent that plans curriculum topics and question metadata using smart topic scoring."""
     
     def __init__(self):
         self.llm = get_llm_provider()
 
-    async def plan_question(self, session: SessionState) -> QuestionMetadata:
+    async def plan_question(
+        self,
+        session: SessionState,
+        last_answer: str = "",
+        last_eval: Optional[EvaluationResult] = None
+    ) -> QuestionMetadata:
         profile = session.analyzedProfile
         stage = session.stage
-        all_days = curriculum_service.get_all_days()
         
-        # Determine candidate completed/weak/skipped day numbers
-        passed_days = [m.day for m in session.candidate.missions if m.passed]
-        skipped_days = [m.day for m in session.candidate.missions if m.skipped]
+        # Determine if we should stay on current topic for follow-up or pick a new smart topic
+        recommended_action = last_eval.recommendedAction if last_eval else "MOVE_TO_NEXT_TOPIC"
         
-        # Ensure curriculum coverage across 4+ days
-        used_days = set(session.daysCovered)
-        available_days = [d for d in all_days if d.day not in used_days]
-        if not available_days:
-            available_days = all_days
-
-        # Pick target day based on stage and candidate background
-        target_day_obj = None
-        
-        if stage == StageEnum.BASELINE:
-            # Baseline question from a passed strength topic or day 7
-            candidate_passed_objs = [d for d in all_days if d.day in passed_days]
-            target_day_obj = candidate_passed_objs[0] if candidate_passed_objs else all_days[2] # Day 7 (Embeddings)
-            
-        elif stage == StageEnum.DEEP_DIVE:
-            # Deep dive on current day or next un-covered day
-            if session.currentDay:
-                target_day_obj = curriculum_service.get_day(session.currentDay)
+        # Should we do a direct follow-up on the current topic?
+        if last_eval and session.followUpCount < 2 and recommended_action in [
+            "FOLLOW_UP_DEEPER", "FOLLOW_UP_CLARIFY", "FOLLOW_UP_SCENARIO", "FOLLOW_UP_DEBUGGING", "FOLLOW_UP_TRADEOFF"
+        ] and session.currentDay:
+            target_day_obj = curriculum_service.get_day(session.currentDay)
             if not target_day_obj:
-                target_day_obj = available_days[0]
-                
-        elif stage == StageEnum.CROSS_TOPIC:
-            # Connect two topics e.g. Day 7/10 + Day 11/12 or Day 21/22 + Day 23
-            target_day_obj = available_days[0] if available_days else all_days[5]
-            
-        elif stage == StageEnum.SYSTEM_DESIGN:
-            # Architecture / RAG / Agents (Day 16, 21, 22)
-            sys_days = [d for d in available_days if d.day in [16, 21, 22, 23]]
-            target_day_obj = sys_days[0] if sys_days else available_days[0]
-            
-        elif stage == StageEnum.PRODUCTION:
-            # Production, Deployment, Security, Observability (Day 25, 27, 28, 29, 30)
-            prod_days = [d for d in all_days if d.day in [25, 27, 28, 29, 30]]
-            target_day_obj = prod_days[0] if prod_days else available_days[0]
-            
+                target_day_obj = curriculum_service.select_smart_topic(
+                    profile=profile,
+                    stage=stage,
+                    days_covered=session.daysCovered,
+                    last_answer=last_answer,
+                    last_eval_score=last_eval.score if last_eval else 7.0
+                )
         else:
-            target_day_obj = available_days[0] if available_days else all_days[0]
+            # Select new topic using Smart Topic Selection Scoring algorithm
+            target_day_obj = curriculum_service.select_smart_topic(
+                profile=profile,
+                stage=stage,
+                days_covered=session.daysCovered,
+                last_answer=last_answer,
+                last_eval_score=last_eval.score if last_eval else 7.0
+            )
 
         target_day = target_day_obj.day
         target_topic = target_day_obj.title
-        
-        # Difficulty selection
         difficulty = session.difficulty
 
-        # Prompt LLM to format QuestionMetadata
-        user_prompt = f"""Candidate Role: {session.candidate.member.jobRole}
+        # Prompt LLM to structure QuestionMetadata
+        user_prompt = f"""Candidate Role: {session.candidate.member.jobRole} ({profile.roleFocus})
 Candidate Experience: {session.candidate.member.yearsExperience} yrs ({profile.experienceLevel})
 Stage: {stage.value}
 Difficulty: {difficulty}
 Selected Curriculum Day: Day {target_day} - {target_topic}
 Tools in topic: {target_day_obj.tools}
 Objectives: {target_day_obj.objectives}
-Already Covered Days: {list(used_days)}
+Already Covered Days: {session.daysCovered}
+Last Evaluator Action: {recommended_action}
+Last Candidate Answer: "{last_answer}"
 
 Plan the next question metadata now.
 """
@@ -101,7 +88,7 @@ Plan the next question metadata now.
                 purpose=res_dict.get("purpose", f"Assess knowledge of {target_topic}"),
                 expectedSignals=res_dict.get("expectedSignals", target_day_obj.tools)
             )
-        except Exception as e:
+        except Exception:
             # Fallback metadata
             return QuestionMetadata(
                 question=f"In your work with {target_topic}, how do you apply {target_day_obj.tools[0] if target_day_obj.tools else 'key principles'}?",
